@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using BusinessOperations.Application.Common;
 using BusinessOperations.Application.Customers;
 using BusinessOperations.Application.Invoices;
@@ -12,7 +13,11 @@ namespace BusinessOperations.IntegrationTests;
 public class InvoiceApiTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     public InvoiceApiTests(CustomWebApplicationFactory factory)
     {

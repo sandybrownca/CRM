@@ -14,12 +14,12 @@ public static class InvoiceEndpoints
             .RequireAuthorization();
 
         group.MapGet("/", async (
+            IInvoiceService invoices,
+            CancellationToken cancellationToken,
             [FromQuery] Guid? customerId,
             [FromQuery] InvoiceStatus? status,
-            [FromQuery] int page,
-            [FromQuery] int pageSize,
-            IInvoiceService invoices,
-            CancellationToken cancellationToken) =>
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20) =>
         {
             var result = await invoices.SearchAsync(
                 customerId,

@@ -1,6 +1,10 @@
+using System.Security.Claims;
 using BusinessOperations.Application.Customers;
+using BusinessOperations.Domain.Customers;
 using BusinessOperations.Domain.Identity;
+using BusinessOperations.Infrastructure.Identity;
 using FluentValidation;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 
 namespace BusinessOperations.Api.Endpoints;
@@ -26,6 +30,66 @@ public static class CustomerEndpoints
                 pageSize <= 0 ? 20 : pageSize,
                 cancellationToken);
             return Results.Ok(result);
+        });
+
+        group.MapGet("/{id:guid}/activities", async (
+            Guid id,
+            ICustomerService customers,
+            CancellationToken cancellationToken,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20) =>
+        {
+            var result = await customers.SearchActivitiesAsync(
+                id,
+                page <= 0 ? 1 : page,
+                pageSize <= 0 ? 20 : pageSize,
+                cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        group.MapGet("/{id:guid}/interactions", async (
+            Guid id,
+            ICustomerInteractionService interactions,
+            CancellationToken cancellationToken,
+            [FromQuery] InteractionChannel? channel = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20) =>
+        {
+            var result = await interactions.SearchAsync(
+                id,
+                channel,
+                page <= 0 ? 1 : page,
+                pageSize <= 0 ? 20 : pageSize,
+                cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        group.MapPost("/{id:guid}/interactions", async (
+            Guid id,
+            [FromBody] LogInteractionRequest request,
+            ClaimsPrincipal principal,
+            UserManager<ApplicationUser> users,
+            ICustomerInteractionService interactions,
+            CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var user = await users.GetUserAsync(principal);
+                var recordedBy = user?.DisplayName;
+                if (string.IsNullOrWhiteSpace(recordedBy))
+                {
+                    recordedBy = principal.Identity?.Name ?? "Staff";
+                }
+
+                var created = await interactions.LogAsync(id, request, recordedBy, cancellationToken);
+                return created is null
+                    ? Results.NotFound()
+                    : Results.Created($"/api/v1/customers/{id}/interactions/{created.Id}", created);
+            }
+            catch (ValidationException ex)
+            {
+                return Results.ValidationProblem(ToErrors(ex));
+            }
         });
 
         group.MapGet("/{id:guid}", async (

@@ -40,7 +40,8 @@ public sealed class CustomerService : ICustomerService
             var term = search.Trim().ToLowerInvariant();
             query = query.Where(c =>
                 c.Name.ToLower().Contains(term) ||
-                c.Email.ToLower().Contains(term));
+                c.Email.ToLower().Contains(term) ||
+                (c.JobTitle != null && c.JobTitle.ToLower().Contains(term)));
         }
 
         var totalCount = await query.CountAsync(cancellationToken);
@@ -55,7 +56,10 @@ public sealed class CustomerService : ICustomerService
                 c.Email,
                 c.Status,
                 c.Invoices.Where(i => i.Status == InvoiceStatus.Issued).Sum(i => (decimal?)(i.TotalAmount - i.AmountPaid)) ?? 0m,
-                c.Invoices.Count(i => i.Status == InvoiceStatus.Issued)))
+                c.Invoices.Count(i => i.Status == InvoiceStatus.Issued),
+                c.Kind,
+                c.JobTitle,
+                c.BillingCity))
 
             .ToListAsync(cancellationToken);
 
@@ -102,7 +106,15 @@ public sealed class CustomerService : ICustomerService
             request.BillingCity,
             request.BillingState,
             request.BillingPostalCode,
-            request.BillingCountry);
+            request.BillingCountry,
+            request.Kind,
+            request.JobTitle,
+            request.ShippingAddressLine1,
+            request.ShippingAddressLine2,
+            request.ShippingCity,
+            request.ShippingState,
+            request.ShippingPostalCode,
+            request.ShippingCountry);
 
         _db.Customers.Add(customer);
         _db.CustomerActivities.Add(new CustomerActivity
@@ -150,7 +162,15 @@ public sealed class CustomerService : ICustomerService
             request.BillingCity,
             request.BillingState,
             request.BillingPostalCode,
-            request.BillingCountry);
+            request.BillingCountry,
+            request.Kind,
+            request.JobTitle,
+            request.ShippingAddressLine1,
+            request.ShippingAddressLine2,
+            request.ShippingCity,
+            request.ShippingState,
+            request.ShippingPostalCode,
+            request.ShippingCountry);
 
         _db.CustomerActivities.Add(new CustomerActivity
         {
@@ -192,6 +212,47 @@ public sealed class CustomerService : ICustomerService
         return true;
     }
 
+    public async Task<PagedResult<CustomerActivityDto>?> SearchActivitiesAsync(
+        Guid customerId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var exists = await _db.Customers.AnyAsync(c => c.Id == customerId, cancellationToken);
+        if (!exists)
+        {
+            return null;
+        }
+
+        page = Math.Max(page, 1);
+        pageSize = Math.Clamp(pageSize, 1, 100);
+
+        var query = _db.CustomerActivities.AsNoTracking().Where(a => a.CustomerId == customerId);
+        var totalCount = await query.CountAsync(cancellationToken);
+
+        var items = await query
+            .OrderByDescending(a => a.OccurredAtUtc)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(a => new CustomerActivityDto(
+                a.Id,
+                a.CustomerId,
+                a.Customer != null ? a.Customer.Name : string.Empty,
+                a.EventType,
+                a.Description,
+                a.RelatedRecordId,
+                a.OccurredAtUtc))
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<CustomerActivityDto>
+        {
+            Items = items,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount
+        };
+    }
+
     private static CustomerDetailsDto MapDetails(Customer customer) =>
         new(
             customer.Id,
@@ -206,5 +267,13 @@ public sealed class CustomerService : ICustomerService
             customer.BillingCountry,
             customer.Status,
             customer.CreatedAtUtc,
-            customer.UpdatedAtUtc);
+            customer.UpdatedAtUtc,
+            customer.Kind,
+            customer.JobTitle,
+            customer.ShippingAddressLine1,
+            customer.ShippingAddressLine2,
+            customer.ShippingCity,
+            customer.ShippingState,
+            customer.ShippingPostalCode,
+            customer.ShippingCountry);
 }

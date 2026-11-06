@@ -36,18 +36,29 @@ import {
   createInvoice,
   issueInvoice,
   searchInvoices,
+  syncInvoiceToErp,
   voidInvoice,
   type CreateLineItemInput,
+  type InvoiceListItem,
   type InvoiceStatus,
 } from '../api/invoices'
+import { recordPayment } from '../api/payments'
 
 export function InvoicesPage() {
-  const { user, loading, logout } = useAuth()
+  const { user, loading, logout, isAdmin } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const customerIdFilter = searchParams.get('customerId') || undefined
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | ''>('')
   const [open, setOpen] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [paymentTarget, setPaymentTarget] = useState<InvoiceListItem | null>(null)
+  const [paymentAmount, setPaymentAmount] = useState('')
+  const [paymentReference, setPaymentReference] = useState('')
+  const [paymentMethod, setPaymentMethod] = useState<'Manual' | 'SimulatedCard'>('Manual')
+  const [cardBrand, setCardBrand] = useState('Visa')
+  const [cardLast4, setCardLast4] = useState('')
+  const [paymentError, setPaymentError] = useState<string | null>(null)
+  const [paymentNotice, setPaymentNotice] = useState<string | null>(null)
   const queryClient = useQueryClient()
 
   // New Invoice Form State
@@ -103,6 +114,39 @@ export function InvoicesPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['invoices'] })
       await queryClient.invalidateQueries({ queryKey: ['customers'] })
+    },
+  })
+
+  const erpMutation = useMutation({
+    mutationFn: syncInvoiceToErp,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+
+  const paymentMutation = useMutation({
+    mutationFn: (input: {
+      invoiceId: string
+      amount: number
+      reference?: string
+      method: 'Manual' | 'SimulatedCard'
+      cardBrand?: string
+      cardLast4?: string
+    }) => recordPayment(input.invoiceId, input),
+    onSuccess: async (payment) => {
+      await queryClient.invalidateQueries({ queryKey: ['invoices'] })
+      await queryClient.invalidateQueries({ queryKey: ['customers'] })
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      setPaymentTarget(null)
+      setPaymentNotice(
+        payment.authorizationCode
+          ? `Simulated authorization ${payment.authorizationCode} for ${payment.cardBrand} ending ${payment.cardLast4}. The card number was not stored.`
+          : null,
+      )
+    },
+    onError: (err: Error) => {
+      setPaymentError(err.message || 'Failed to record payment.')
     },
   })
 
@@ -200,12 +244,20 @@ export function InvoicesPage() {
           <Typography variant="h6" sx={{ fontWeight: 700, mr: 2 }}>
             Business Operations CRM
           </Typography>
+          <Button component={RouterLink} to="/dashboard" color="inherit">
+            Dashboard
+          </Button>
           <Button component={RouterLink} to="/customers" color="inherit">
             Customers
           </Button>
           <Button component={RouterLink} to="/invoices" color="primary" sx={{ fontWeight: 700 }}>
             Invoices
           </Button>
+          {isAdmin && (
+            <Button component={RouterLink} to="/users" color="inherit">
+              Users
+            </Button>
+          )}
           <Box sx={{ flexGrow: 1 }} />
           <Typography variant="body2">{user.displayName}</Typography>
           <Button onClick={() => void logout()}>Sign out</Button>
@@ -223,7 +275,7 @@ export function InvoicesPage() {
               Invoices
             </Typography>
             <Typography color="text.secondary">
-              Create, issue, void, and track invoice receivables.
+              Create and issue invoices, then record payments against the balance due.
             </Typography>
           </Box>
           <Button
@@ -232,6 +284,7 @@ export function InvoicesPage() {
               resetForm()
               setOpen(true)
             }}
+            sx={{ alignSelf: 'center', flexShrink: 0 }}
           >
             New invoice
           </Button>
@@ -267,6 +320,11 @@ export function InvoicesPage() {
           )}
         </Stack>
 
+        {paymentNotice && (
+          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setPaymentNotice(null)}>
+            {paymentNotice}
+          </Alert>
+        )}
         {invoicesQuery.isLoading && <CircularProgress />}
         {invoicesQuery.isError && <Alert severity="error">Failed to load invoices.</Alert>}
 
@@ -280,8 +338,12 @@ export function InvoicesPage() {
                   <TableCell sx={{ fontWeight: 700 }}>Issue Date</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Due Date</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>ERP</TableCell>
                   <TableCell align="right" sx={{ fontWeight: 700 }}>
                     Total
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 700 }}>
+                    Paid
                   </TableCell>
                   <TableCell align="right" sx={{ fontWeight: 700 }}>
                     Balance Due
@@ -306,30 +368,70 @@ export function InvoicesPage() {
                         variant={inv.status === 'Draft' ? 'outlined' : 'filled'}
                       />
                     </TableCell>
+                    <TableCell>
+                      {inv.erpStatus === 'Succeeded' && inv.erpExternalReference
+                        ? inv.erpExternalReference
+                        : inv.erpStatus === 'Failed'
+                          ? 'Failed'
+                          : inv.erpStatus === 'Pending'
+                            ? 'Pending'
+                            : '—'}
+                    </TableCell>
                     <TableCell align="right">${inv.totalAmount.toFixed(2)}</TableCell>
+                    <TableCell align="right">${inv.amountPaid.toFixed(2)}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 600 }}>
                       ${inv.balanceDue.toFixed(2)}
                     </TableCell>
                     <TableCell align="center">
-                      <Stack direction="row" spacing={1} sx={{ justifyContent: 'center' }}>
+                      <Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
                         {inv.status === 'Draft' && (
                           <Button
                             size="small"
                             variant="outlined"
-                            color="primary"
                             onClick={() => issueMutation.mutate(inv.id)}
                             disabled={issueMutation.isPending}
+                            sx={{ whiteSpace: 'nowrap' }}
                           >
                             Issue
                           </Button>
                         )}
-                        {(inv.status === 'Draft' || inv.status === 'Issued') && (
+                        {inv.status === 'Issued' && inv.balanceDue > 0 && (
                           <Button
                             size="small"
-                            variant="text"
+                            variant="outlined"
+                            onClick={() => {
+                              setPaymentTarget(inv)
+                              setPaymentAmount(inv.balanceDue.toFixed(2))
+                              setPaymentReference('')
+                              setPaymentMethod('Manual')
+                              setCardBrand('Visa')
+                              setCardLast4('')
+                              setPaymentError(null)
+                            }}
+                            sx={{ whiteSpace: 'nowrap' }}
+                          >
+                            Record payment
+                          </Button>
+                        )}
+                        {isAdmin && (inv.status === 'Issued' || inv.status === 'Paid') && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => erpMutation.mutate(inv.id)}
+                            disabled={erpMutation.isPending}
+                            sx={{ whiteSpace: 'nowrap' }}
+                          >
+                            Sync to ERP
+                          </Button>
+                        )}
+                        {(inv.status === 'Draft' || inv.status === 'Issued') && inv.amountPaid === 0 && (
+                          <Button
+                            size="small"
+                            variant="outlined"
                             color="error"
                             onClick={() => voidMutation.mutate(inv.id)}
                             disabled={voidMutation.isPending}
+                            sx={{ whiteSpace: 'nowrap' }}
                           >
                             Void
                           </Button>
@@ -340,7 +442,7 @@ export function InvoicesPage() {
                 ))}
                 {invoicesQuery.data.items.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} align="center" sx={{ py: 3 }}>
+                    <TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                       <Typography color="text.secondary">No invoices found.</Typography>
                     </TableCell>
                   </TableRow>
@@ -461,9 +563,14 @@ export function InvoicesPage() {
               </Box>
 
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', pt: 1, borderTop: '1px solid #eee' }}>
-                <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                  Total: ${calculatedTotal.toFixed(2)}
-                </Typography>
+                <Box sx={{ textAlign: 'right' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                    Subtotal: ${calculatedTotal.toFixed(2)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    The server adds 8% tax when the draft is saved. The saved total includes that tax.
+                  </Typography>
+                </Box>
               </Box>
             </Stack>
           </DialogContent>
@@ -471,6 +578,118 @@ export function InvoicesPage() {
             <Button onClick={() => setOpen(false)}>Cancel</Button>
             <Button type="submit" variant="contained" disabled={createMutation.isPending}>
               Create Draft Invoice
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
+
+      <Dialog open={paymentTarget !== null} onClose={() => setPaymentTarget(null)} fullWidth maxWidth="sm">
+        <DialogTitle sx={{ fontWeight: 700 }}>Record payment</DialogTitle>
+        <Box
+          component="form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!paymentTarget) {
+              return
+            }
+
+            setPaymentError(null)
+            const trimmed = paymentAmount.trim()
+            if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) {
+              setPaymentError('Enter an amount greater than zero with at most two decimal places.')
+              return
+            }
+
+            const amount = Number(trimmed)
+            if (amount <= 0) {
+              setPaymentError('Enter an amount greater than zero with at most two decimal places.')
+              return
+            }
+
+            const amountCents = Math.round(amount * 100)
+            const balanceCents = Math.round(paymentTarget.balanceDue * 100)
+            if (amountCents > balanceCents) {
+              setPaymentError('Amount cannot exceed the balance due.')
+              return
+            }
+
+            if (paymentMethod === 'SimulatedCard' && !/^\d{4}$/.test(cardLast4)) {
+              setPaymentError('Enter only the last four digits. Do not enter the full card number.')
+              return
+            }
+
+            paymentMutation.mutate({
+              invoiceId: paymentTarget.id,
+              amount,
+              reference: paymentReference.trim() || undefined,
+              method: paymentMethod,
+              cardBrand: paymentMethod === 'SimulatedCard' ? cardBrand.trim() : undefined,
+              cardLast4: paymentMethod === 'SimulatedCard' ? cardLast4 : undefined,
+            })
+          }}
+        >
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              {paymentError && <Alert severity="error">{paymentError}</Alert>}
+              <Typography>
+                {paymentTarget?.invoiceNumber} · {paymentTarget?.customerName}
+              </Typography>
+              <Typography color="text.secondary">
+                Balance due ${paymentTarget ? paymentTarget.balanceDue.toFixed(2) : '0.00'}. The server
+                applies this amount to the invoice. A partial payment leaves the invoice issued.
+              </Typography>
+              <TextField
+                label="Amount"
+                type="number"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                fullWidth
+                required
+                slotProps={{ htmlInput: { min: 0.01, step: '0.01' } }}
+              />
+              <TextField
+                select
+                label="Method"
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value as 'Manual' | 'SimulatedCard')}
+                fullWidth
+              >
+                <MenuItem value="Manual">Recorded payment</MenuItem>
+                <MenuItem value="SimulatedCard">Simulated card</MenuItem>
+              </TextField>
+              {paymentMethod === 'SimulatedCard' && (
+                <>
+                  <TextField
+                    label="Card brand"
+                    value={cardBrand}
+                    onChange={(e) => setCardBrand(e.target.value)}
+                    fullWidth
+                    required
+                  />
+                  <TextField
+                    label="Last four digits"
+                    value={cardLast4}
+                    onChange={(e) => setCardLast4(e.target.value)}
+                    fullWidth
+                    required
+                    placeholder="4242"
+                    slotProps={{ htmlInput: { maxLength: 4, inputMode: 'numeric' } }}
+                  />
+                </>
+              )}
+              <TextField
+                label="Reference"
+                value={paymentReference}
+                onChange={(e) => setPaymentReference(e.target.value)}
+                fullWidth
+                placeholder="Check number or transfer id"
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setPaymentTarget(null)}>Cancel</Button>
+            <Button type="submit" variant="contained" disabled={paymentMutation.isPending}>
+              Record payment
             </Button>
           </DialogActions>
         </Box>

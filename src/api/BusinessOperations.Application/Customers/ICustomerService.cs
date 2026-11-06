@@ -17,4 +17,11 @@ public interface ICustomerService
     Task<CustomerDetailsDto?> UpdateAsync(Guid id, UpdateCustomerRequest request, CancellationToken cancellationToken = default);
 
     Task<bool> DeactivateAsync(Guid id, CancellationToken cancellationToken = default);
+    
+    Task<PagedResult<CustomerActivityDto>?>SearchActivitiesAsync(
+        Guid customerId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default
+    );
 }

@@ -1,27 +1,36 @@
 using BusinessOperations.Application.Common;
+using BusinessOperations.Application.Erp;
 using BusinessOperations.Application.Invoices;
 using BusinessOperations.Domain.Customers;
+using BusinessOperations.Domain.Erp;
 using BusinessOperations.Domain.Invoices;
 using BusinessOperations.Infrastructure.Persistence;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace BusinessOperations.Infrastructure.Invoices;
 
 public sealed class InvoiceService : IInvoiceService
 {
     private readonly AppDbContext _db;
+    private readonly IErpSyncService _erp;
     private readonly IValidator<CreateInvoiceRequest> _createValidator;
     private readonly IValidator<UpdateInvoiceRequest> _updateValidator;
+    private readonly decimal _taxRate;
 
     public InvoiceService(
         AppDbContext db,
+        IErpSyncService erp,
         IValidator<CreateInvoiceRequest> createValidator,
-        IValidator<UpdateInvoiceRequest> updateValidator)
+        IValidator<UpdateInvoiceRequest> updateValidator,
+        IConfiguration configuration)
     {
         _db = db;
+        _erp = erp;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
+        _taxRate = configuration.GetValue("Tax:Rate", 0m);
     }
 
     public async Task<PagedResult<InvoiceListItemDto>> SearchAsync(
@@ -63,8 +72,12 @@ public sealed class InvoiceService : IInvoiceService
                 i.TotalAmount,
                 i.AmountPaid,
                 i.BalanceDue,
-                i.CreatedAtUtc))
+                i.CreatedAtUtc,
+                (ErpSyncStatus?)null,
+                null))
             .ToListAsync(cancellationToken);
+
+        items = await AttachErpAsync(items, cancellationToken);
 
         return new PagedResult<InvoiceListItemDto>
         {
@@ -127,6 +140,7 @@ public sealed class InvoiceService : IInvoiceService
             invoice.AddLineItem(item.Description, item.Quantity, item.UnitPrice);
         }
 
+        invoice.ApplyTaxRate(_taxRate);
         _db.Invoices.Add(invoice);
         _db.CustomerActivities.Add(new CustomerActivity
         {
@@ -170,6 +184,7 @@ public sealed class InvoiceService : IInvoiceService
             invoice.AddLineItem(item.Description, item.Quantity, item.UnitPrice);
         }
 
+        invoice.ApplyTaxRate(_taxRate);
         _db.CustomerActivities.Add(new CustomerActivity
         {
             CustomerId = invoice.CustomerId,
@@ -214,6 +229,7 @@ public sealed class InvoiceService : IInvoiceService
         });
 
         await _db.SaveChangesAsync(cancellationToken);
+        await _erp.SyncAsync(invoice.Id, cancellationToken);
         return MapDetails(invoice);
     }
 
@@ -251,6 +267,29 @@ public sealed class InvoiceService : IInvoiceService
         return MapDetails(invoice);
     }
 
+    private async Task<List<InvoiceListItemDto>> AttachErpAsync(
+        List<InvoiceListItemDto> items,
+        CancellationToken cancellationToken)
+    {
+        if (items.Count == 0)
+        {
+            return items;
+        }
+
+        var ids = items.Select(i => i.Id).ToList();
+        var syncs = await _db.ErpSyncs.AsNoTracking()
+            .Where(s => ids.Contains(s.InvoiceId))
+            .Select(s => new { s.InvoiceId, s.Status, s.ExternalReference })
+            .ToListAsync(cancellationToken);
+        var byInvoice = syncs.ToDictionary(s => s.InvoiceId);
+
+        return items
+            .Select(item => byInvoice.TryGetValue(item.Id, out var sync)
+                ? item with { ErpStatus = sync.Status, ErpExternalReference = sync.ExternalReference }
+                : item)
+            .ToList();
+    }
+
     private static InvoiceDetailsDto MapDetails(Invoice invoice, string? customerName = null, string? customerEmail = null)
     {
         return new InvoiceDetailsDto(
@@ -263,6 +302,8 @@ public sealed class InvoiceService : IInvoiceService
             invoice.DueDate,
             invoice.Status,
             invoice.Subtotal,
+            invoice.TaxRate,
+            invoice.TaxAmount,
             invoice.TotalAmount,
             invoice.AmountPaid,
             invoice.BalanceDue,

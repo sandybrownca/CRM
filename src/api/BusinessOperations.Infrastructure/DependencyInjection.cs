@@ -1,15 +1,22 @@
 using BusinessOperations.Application.Customers;
 using BusinessOperations.Application.Invoices;
+using BusinessOperations.Application.Erp;
+using BusinessOperations.Application.Dashboard;
+using BusinessOperations.Application.Payments;
+using BusinessOperations.Application.Users;
 using BusinessOperations.Infrastructure.Customers;
+using BusinessOperations.Infrastructure.Dashboard;
+using BusinessOperations.Infrastructure.Erp;
 using BusinessOperations.Infrastructure.Identity;
 using BusinessOperations.Infrastructure.Invoices;
+using BusinessOperations.Infrastructure.Payments;
+using BusinessOperations.Infrastructure.Users;
 using BusinessOperations.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-
 namespace BusinessOperations.Infrastructure;
 
 public static class DependencyInjection
@@ -48,15 +55,31 @@ public static class DependencyInjection
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return Task.CompletedTask;
             };
-            options.Events.OnRedirectToAccessDenied = context =>
+            options.Events.OnValidatePrincipal = async context =>
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return Task.CompletedTask;
+                await SecurityStampValidator.ValidatePrincipalAsync(context);
+                if(context.Principal is null)
+                {
+                    return;
+                }
+                var userManager = context.HttpContext.RequestServices.GetRequiredService<UserManager<ApplicationUser>>();
+                var user = await userManager.GetUserAsync(context.Principal);
+                if(user is null || !user.IsActive)
+                {
+                    context.RejectPrincipal();
+                }
             };
         });
 
+        services.AddSingleton<SimulatedErpClient>();
+        services.AddSingleton<IErpClient>(sp=> sp.GetRequiredService<SimulatedErpClient>());
+        services.AddScoped<IErpSyncService, ErpSyncService>();        
         services.AddScoped<ICustomerService, CustomerService>();
+        services.AddScoped<ICustomerInteractionService, CustomerInteractionService>();
         services.AddScoped<IInvoiceService, InvoiceService>();
+        services.AddScoped<IPaymentService, PaymentService>();      
+        services.AddScoped<IDashboardService, DashboardService>();
+        services.AddScoped<IUserAdminService, UserAdminService>();
 
         return services;
     }

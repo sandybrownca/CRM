@@ -30,14 +30,14 @@ export function LoginPage() {
   })
 
   if (!loading && user) {
-    return <Navigate to="/customers" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   const onSubmit = handleSubmit(async (values) => {
     setError(null)
     try {
       await login(values.email, values.password)
-      navigate('/customers')
+      navigate('/dashboard')
     } catch {
       setError('Invalid email or password.')
     }

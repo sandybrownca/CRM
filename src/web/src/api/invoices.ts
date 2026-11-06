@@ -22,6 +22,8 @@ export type InvoiceListItem = {
   amountPaid: number
   balanceDue: number
   createdAtUtc: string
+  erpStatus?: 'Pending' | 'Succeeded' | 'Failed' | null
+  erpExternalReference?: string | null
 }
 
 export type InvoiceDetails = {
@@ -69,18 +71,15 @@ export async function searchInvoices(options?: {
   page?: number
   pageSize?: number
 }): Promise<PagedInvoices> {
-  const params = new URLSearchParams()
+  const params = new URLSearchParams({
+    page: String(options?.page ?? 1),
+    pageSize: String(options?.pageSize ?? 20),
+  })
   if (options?.customerId) {
     params.set('customerId', options.customerId)
   }
   if (options?.status) {
     params.set('status', options.status)
-  }
-  if (options?.page) {
-    params.set('page', String(options.page))
-  }
-  if (options?.pageSize) {
-    params.set('pageSize', String(options.pageSize))
   }
 
   const query = params.toString() ? `?${params.toString()}` : ''
@@ -102,6 +101,18 @@ export async function issueInvoice(id: string): Promise<InvoiceDetails> {
   return apiFetch<InvoiceDetails>(`/api/v1/invoices/${id}/issue`, {
     method: 'POST',
   })
+}
+
+export async function syncInvoiceToErp(id: string): Promise<{
+  id: string
+  invoiceId: string
+  status: 'Pending' | 'Succeeded' | 'Failed'
+  idempotencyKey: string
+  externalReference?: string | null
+  attemptCount: number
+  lastError?: string | null
+}> {
+  return apiFetch(`/api/v1/invoices/${id}/erp-sync`, { method: 'POST' })
 }
 
 export async function voidInvoice(id: string): Promise<InvoiceDetails> {

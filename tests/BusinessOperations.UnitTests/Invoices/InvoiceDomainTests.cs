@@ -13,9 +13,25 @@ public class InvoiceDomainTests
         invoice.AddLineItem("Platform Fee", 1, 99.99m);
 
         invoice.Subtotal.Should().Be(1602.49m);
+        invoice.TaxAmount.Should().Be(0m);
         invoice.TotalAmount.Should().Be(1602.49m);
         invoice.BalanceDue.Should().Be(1602.49m);
         invoice.Status.Should().Be(InvoiceStatus.Draft);
+    }
+
+    [Fact]
+    public void ApplyTaxRate_adds_rounded_tax_to_the_server_total()
+    {
+        var invoice = new Invoice();
+        invoice.AddLineItem("Consulting Hours", 10, 150.25m);
+        invoice.AddLineItem("Platform Fee", 1, 99.99m);
+
+        invoice.ApplyTaxRate(0.08m);
+
+        invoice.TaxRate.Should().Be(0.08m);
+        invoice.TaxAmount.Should().Be(128.20m);
+        invoice.TotalAmount.Should().Be(1730.69m);
+        invoice.BalanceDue.Should().Be(1730.69m);
     }
 
     [Fact]
@@ -111,5 +127,44 @@ public class InvoiceDomainTests
 
         action.Should().Throw<InvalidOperationException>()
             .WithMessage("*received payments*");
+    }
+
+    [Fact]
+    public void RecordPayment_rejects_non_positive_amounts()
+    {
+        var invoice = new Invoice();
+        invoice.AddLineItem("Service", 1, 100m);
+        invoice.Issue();
+
+        var zero = () => invoice.RecordPayment(0m);
+        var negative = () => invoice.RecordPayment(-1m);
+
+        zero.Should().Throw<ArgumentOutOfRangeException>();
+        negative.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public void RecordPayment_rejects_amount_above_balance()
+    {
+        var invoice = new Invoice();
+        invoice.AddLineItem("Service", 1, 100m);
+        invoice.Issue();
+
+        var action = () => invoice.RecordPayment(100.01m);
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*exceeds balance*");
+    }
+
+    [Fact]
+    public void RecordPayment_rejects_invoices_that_are_not_issued()
+    {
+        var invoice = new Invoice();
+        invoice.AddLineItem("Service", 1, 100m);
+
+        var action = () => invoice.RecordPayment(10m);
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Draft*");
     }
 }

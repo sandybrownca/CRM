@@ -12,6 +12,8 @@ public class Invoice : EntityBase
     public DateTime DueDate { get; set; } = DateTime.UtcNow.Date.AddDays(30);
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
     public decimal Subtotal { get; set; }
+    public decimal TaxRate { get; set; }
+    public decimal TaxAmount { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal AmountPaid { get; set; }
     public decimal BalanceDue => Math.Max(0m, TotalAmount - AmountPaid);
@@ -47,10 +49,22 @@ public class Invoice : EntityBase
         UpdatedAtUtc = DateTime.UtcNow;
     }
 
+    public void ApplyTaxRate(decimal taxRate)
+    {
+        if (taxRate < 0m || taxRate > 1m)
+        {
+            throw new InvalidOperationException("Tax rate must be between 0 and 1.");
+        }
+
+        TaxRate = taxRate;
+        RecalculateTotals();
+    }
+
     public void RecalculateTotals()
     {
         Subtotal = LineItems.Sum(li => li.Quantity * li.UnitPrice);
-        TotalAmount = Subtotal;
+        TaxAmount = decimal.Round(Subtotal * TaxRate, 2, MidpointRounding.AwayFromZero);
+        TotalAmount = Subtotal + TaxAmount;
         UpdatedAtUtc = DateTime.UtcNow;
     }
 

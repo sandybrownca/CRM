@@ -26,5 +26,6 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     {
         builder.UseEnvironment("Development");
         builder.UseSetting("ConnectionStrings:DefaultConnection", _sql.GetConnectionString());
+        builder.UseSetting("Tax:Rate", "0");
     }
 }

@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using BusinessOperations.Application.Common;
 using BusinessOperations.Application.Customers;
+using BusinessOperations.Domain.Customers;
 using FluentAssertions;
 
 namespace BusinessOperations.IntegrationTests;
@@ -9,7 +12,11 @@ namespace BusinessOperations.IntegrationTests;
 public class CustomerApiTests : IClassFixture<CustomWebApplicationFactory>
 {
     private readonly HttpClient _client;
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     public CustomerApiTests(CustomWebApplicationFactory factory)
     {
@@ -69,6 +76,68 @@ public class CustomerApiTests : IClassFixture<CustomWebApplicationFactory>
 
         var second = await _client.PostAsJsonAsync("/api/v1/customers", request with { Name = "Second" });
         second.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Staff_can_save_an_individual_and_log_an_interaction()
+    {
+        await LoginAsync("ops@local.dev", "ChangeMe!Ops123");
+        await EnsureCsrfAsync();
+
+        var createResponse = await _client.PostAsJsonAsync("/api/v1/customers", new CreateCustomerRequest(
+            "Ada Lovelace",
+            $"ada-{Guid.NewGuid():N}@example.com",
+            "555-0101",
+            "1 Analytical Engine",
+            null,
+            "London",
+            null,
+            "SW1A",
+            "UK",
+            CustomerKind.Individual,
+            "Engineer",
+            "2 Shipping Lane",
+            null,
+            "London",
+            null,
+            "SW1A",
+            "UK"));
+
+        createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = await createResponse.Content.ReadFromJsonAsync<CustomerDetailsDto>(JsonOptions);
+        created!.Kind.Should().Be(CustomerKind.Individual);
+        created.JobTitle.Should().Be("Engineer");
+        created.ShippingAddressLine1.Should().Be("2 Shipping Lane");
+
+        var company = await _client.PostAsJsonAsync("/api/v1/customers", new CreateCustomerRequest(
+            "Acme Corp",
+            $"acme-{Guid.NewGuid():N}@example.com",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CustomerKind.Company,
+            "Owner"));
+        company.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        var logResponse = await _client.PostAsJsonAsync(
+            $"/api/v1/customers/{created.Id}/interactions",
+            new LogInteractionRequest(InteractionChannel.Phone, "Renewal call", "Asked about the open invoice.", null));
+        logResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        var logged = await logResponse.Content.ReadFromJsonAsync<CustomerInteractionDto>(JsonOptions);
+        logged!.Channel.Should().Be(InteractionChannel.Phone);
+        logged.RecordedByName.Should().NotBeNullOrWhiteSpace();
+
+        var listResponse = await _client.GetAsync($"/api/v1/customers/{created.Id}/interactions");
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var logs = await listResponse.Content.ReadFromJsonAsync<PagedResult<CustomerInteractionDto>>(JsonOptions);
+        logs!.Items.Should().Contain(i => i.Id == logged.Id);
+
+        var missing = await _client.GetAsync($"/api/v1/customers/{Guid.NewGuid()}/interactions");
+        missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     private async Task LoginAsync(string email, string password)

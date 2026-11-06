@@ -1,4 +1,5 @@
 using BusinessOperations.Domain.Invoices;
+using BusinessOperations.Domain.Erp;
 
 namespace BusinessOperations.Application.Invoices;
 
@@ -20,7 +21,9 @@ public sealed record InvoiceListItemDto(
     decimal TotalAmount,
     decimal AmountPaid,
     decimal BalanceDue,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    ErpSyncStatus? ErpStatus,
+    string? ErpExternalReference);
 
 public sealed record InvoiceDetailsDto(
     Guid Id,
@@ -32,6 +35,8 @@ public sealed record InvoiceDetailsDto(
     DateTime DueDate,
     InvoiceStatus Status,
     decimal Subtotal,
+    decimal TaxRate,
+    decimal TaxAmount,
     decimal TotalAmount,
     decimal AmountPaid,
     decimal BalanceDue,

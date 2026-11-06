@@ -5,6 +5,8 @@ import { AuthProvider } from './auth/AuthContext'
 import { CustomersPage } from './pages/CustomersPage'
 import { InvoicesPage } from './pages/InvoicesPage'
 import { LoginPage } from './pages/LoginPage'
+import { UsersPage } from './pages/UsersPage'
+import { DashboardPage } from './pages/DashboardPage'
 
 const queryClient = new QueryClient()
 
@@ -29,6 +31,8 @@ export default function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/invoices" element={<InvoicesPage />} />
+              <Route path="/dashboard" element={<DashboardPage/>} />
+              <Route path="/users" element={<UsersPage />} />
               <Route path="*" element={<Navigate to="/customers" replace />} />
             </Routes>
           </BrowserRouter>

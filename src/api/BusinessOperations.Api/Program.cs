@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using BusinessOperations.Api.Endpoints;
 using BusinessOperations.Api.Middleware;
 using BusinessOperations.Application;
@@ -6,11 +7,16 @@ using BusinessOperations.Infrastructure;
 using BusinessOperations.Infrastructure.Identity;
 using BusinessOperations.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using BusinessOperations.Infrastructure.Persistence.Seeding;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.ConfigureHttpJsonOptions(options=>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
 builder.Services.AddAuthorization(options =>
 {
@@ -61,6 +67,10 @@ app.MapHealthChecks("/health");
 app.MapAuthEndpoints();
 app.MapCustomerEndpoints();
 app.MapInvoiceEndpoints();
+app.MapPaymentEndpoints();
+app.MapDashboardEndpoints();
+app.MapErpEndpoints();
+app.MapUserEndpoints();
 
 using (var scope = app.Services.CreateScope())
 {
@@ -68,7 +78,10 @@ using (var scope = app.Services.CreateScope())
     await db.Database.MigrateAsync();
     await IdentitySeed.SeedAsync(app.Services);
 }
-
+if (app.Environment.IsDevelopment())
+{
+    await DemoDataSeeder.SeedAsync(app.Services);
+}
 app.Run();
 
 public partial class Program;
