@@ -19,10 +19,10 @@ public static class CustomerEndpoints
 
         group.MapGet("/", async (
             [FromQuery] string? search,
-            [FromQuery] int page,
-            [FromQuery] int pageSize,
             ICustomerService customers,
-            CancellationToken cancellationToken) =>
+            CancellationToken cancellationToken,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20) =>
         {
             var result = await customers.SearchAsync(
                 search,

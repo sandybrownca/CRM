@@ -1,14 +1,17 @@
+
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Testcontainers.MsSql;
 
 namespace BusinessOperations.IntegrationTests;
 
-public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
+public sealed class CustomWebApplicationFactory
+    : WebApplicationFactory<Program>, IAsyncLifetime
 {
     private readonly MsSqlContainer _sql = new MsSqlBuilder()
         .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
         .WithPassword("Your_strong_Password123")
+        .WithEnvironment("ACCEPT_EULA", "Y")
         .Build();
 
     public async Task InitializeAsync()
@@ -25,7 +28,11 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
-        builder.UseSetting("ConnectionStrings:DefaultConnection", _sql.GetConnectionString());
+
+        builder.UseSetting(
+            "ConnectionStrings:DefaultConnection",
+            _sql.GetConnectionString());
+
         builder.UseSetting("Tax:Rate", "0");
     }
 }

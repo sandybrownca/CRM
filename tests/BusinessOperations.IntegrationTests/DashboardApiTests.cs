@@ -56,7 +56,7 @@ public class DashboardApiTests : IClassFixture<CustomWebApplicationFactory>
         createCustomer.StatusCode.Should().Be(HttpStatusCode.Created);
         var customer = (await createCustomer.Content.ReadFromJsonAsync<CustomerDetailsDto>(JsonOptions))!;
 
-        var issueDate = DateTime.UtcNow.Date.AddDays(-10);
+        var issueDate = DateTime.UtcNow.Date.AddDays(-365);
         var createInvoice = await _client.PostAsJsonAsync("/api/v1/invoices", new CreateInvoiceRequest(
             customer.Id,
             issueDate,
